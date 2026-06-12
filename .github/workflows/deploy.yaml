@@ -22,5 +22,12 @@ jobs:
           aws-region: us-east-1
           role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
 
+      - name: Deploy to Nginx
+        run: |
+          sudo apt update
+          sudo mkdir -p /var/www/todo-app
+          # nginx config: root /var/www/todo-app;
+          sudo systemctl restart nginx
+
       - name: Test AWS Credentials
         run: aws sts get-caller-identity
