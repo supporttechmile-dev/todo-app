@@ -1,40 +1,26 @@
-name: Deploy Static Website to EC2
+name: OIDC
 
 on:
   push:
     branches:
       - main
 
-concurrency:
-  group: deploy-ec2
-  cancel-in-progress: true
+permissions:
+  id-token: write
+  contents: read    
 
 jobs:
-  deploy:
+  oidc-test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Copy site files to EC2
-        uses: appleboy/scp-action@v0.1.7
+      - name: Configure AWS Credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu          # use ec2-user for Amazon Linux
-          key: ${{ secrets.SSH_KEY }}
-          source: "index.html,style.css,script.js,bars-icon.svg"
-          target: "/tmp/todo-app"
-          strip_components: 0
+          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE }}
 
-      - name: Deploy on servers
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu          # use ec2-user for Amazon Linux
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            sudo mkdir -p /var/www/todo-app
-            sudo cp -r /tmp/todo-app/* /var/www/todo-app/
-            sudo chown -R www-data:www-data /var/www/todo-app
-            sudo systemctl restart nginx
+      - name: Test AWS Credentials
+        run: aws sts get-caller-identity
