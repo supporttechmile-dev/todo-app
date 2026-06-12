@@ -132,7 +132,7 @@ body{
 }
 .task label input{
   margin-top: 7px;
-  accent-color: #3C87FF;
+  accent-color: #f2ff3c;
 }
 .task label p{
   user-select: none;
