@@ -2,8 +2,10 @@
 #
 # Required GitHub secrets:
 #   AWS_IAM_ROLE      - IAM role ARN trusted by GitHub OIDC
-#   EC2_INSTANCE_ID   - EC2 instance ID (e.g. i-0abc123...)
-#   DEPLOY_BUCKET     - S3 bucket name used as a staging area for site files
+#
+# Required GitHub secrets OR repository variables (Settings → Secrets and variables → Actions):
+#   EC2_INSTANCE_ID   - EC2 instance ID (e.g. i-0abc123def4567890a)
+#   DEPLOY_BUCKET     - S3 bucket name (e.g. my-todo-app-deploy-12345)
 #
 # Required AWS setup (one-time):
 #   1. EC2 Ubuntu instance with SSM Agent (default on AWS Ubuntu AMIs)
@@ -42,8 +44,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      DEPLOY_BUCKET: ${{ secrets.DEPLOY_BUCKET }}
-      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      DEPLOY_BUCKET: ${{ vars.DEPLOY_BUCKET || secrets.DEPLOY_BUCKET }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID || secrets.EC2_INSTANCE_ID }}
 
     steps:
       - name: Checkout source
@@ -56,15 +58,19 @@ jobs:
           [ -z "$DEPLOY_BUCKET" ] && missing="$missing DEPLOY_BUCKET"
           [ -z "$EC2_INSTANCE_ID" ] && missing="$missing EC2_INSTANCE_ID"
           if [ -n "$missing" ]; then
-            echo "ERROR: Missing GitHub repository secrets:$missing"
+            echo "ERROR: Missing required config:$missing"
             echo ""
-            echo "Add them at: Settings → Secrets and variables → Actions → New repository secret"
-            echo "  DEPLOY_BUCKET     = S3 bucket name (e.g. my-todo-app-deploy-12345)"
-            echo "  EC2_INSTANCE_ID   = EC2 instance ID (e.g. i-0abc123def456)"
-            echo "  AWS_IAM_ROLE      = IAM role ARN for GitHub OIDC"
+            echo "Add them in GitHub: Repo → Settings → Secrets and variables → Actions"
+            echo "  (use either Secrets tab OR Variables tab for DEPLOY_BUCKET and EC2_INSTANCE_ID)"
+            echo ""
+            echo "  DEPLOY_BUCKET     = S3 bucket name you created in AWS (no s3:// prefix)"
+            echo "  EC2_INSTANCE_ID   = Instance ID from EC2 console (starts with i-)"
+            echo "  AWS_IAM_ROLE      = secret only — your OIDC IAM role ARN"
             exit 1
           fi
-          echo "Required secrets are configured."
+          echo "DEPLOY_BUCKET=$DEPLOY_BUCKET"
+          echo "EC2_INSTANCE_ID=$EC2_INSTANCE_ID"
+          echo "Required config is set."
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4.1.0
