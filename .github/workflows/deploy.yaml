@@ -2,7 +2,9 @@ name: Deploy Static Site to EC2
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -26,62 +28,60 @@ jobs:
           ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Deploy to EC2 via SSH
+      - name: Install rsync
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+      - name: Deploy to EC2
         env:
           HOST: ${{ secrets.EC2_HOST }}
           USER: ${{ secrets.EC2_USER }}
-          WEB_PATH: ${{ secrets.EC2_WEB_PATH || '/var/www/html' }}
+          WEB_PATH: ${{ secrets.EC2_WEB_PATH }}
         run: |
-          echo "🚀 Starting deployment to $USER@$HOST:$WEB_PATH"
+          WEB_PATH="${WEB_PATH:-/var/www/html}"
 
-          # --- A. Provision Server (Install Nginx, Config, Permissions) ---
-          # We use a single SSH call with a quoted heredoc (EOF) to avoid escaping hell.
-          # The Nginx config is Base64 encoded inline to bypass nested heredoc issues.
-          NGINX_CONF_B64=$(cat << 'NGINXEOF' | base64 -w0
-    server {
-        listen 80 default_server;
-        listen [::]:80 default_server;
-        root $WEB_PATH;
-        index index.html index.htm;
-        server_name _;
-        location / {
-            try_files $uri $uri/ =404;
-        }
-    }
-NGINXEOF
-          )
+          echo "Deploying to $USER@$HOST"
 
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" bash -s << 'ENDSSH'
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "
             set -e
-            echo "📦 Updating packages & Installing Nginx..."
-            sudo apt-get update && sudo apt-get install -y nginx
 
-            echo "📂 Setting up web root: $WEB_PATH"
-            sudo mkdir -p "$WEB_PATH"
-            sudo chown -R "$USER:$USER" "$WEB_PATH"
+            sudo apt-get update
+            sudo apt-get install -y nginx
 
-            echo "⚙️ Writing Nginx config from Base64..."
-            # Decode the config passed via environment variable
-            echo "$NGINX_CONF_B64" | base64 -d | sudo tee /etc/nginx/sites-available/default > /dev/null
+            sudo mkdir -p '$WEB_PATH'
+            sudo chown -R '$USER:$USER' '$WEB_PATH'
 
-            echo "🔄 Reloading Nginx..."
+            cat <<EOF | sudo tee /etc/nginx/sites-available/default > /dev/null
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+
+    root $WEB_PATH;
+    index index.html index.htm;
+
+    server_name _;
+
+    location / {
+        try_files \\\$uri \\\$uri/ =404;
+    }
+}
+EOF
+
+            sudo nginx -t
             sudo systemctl enable nginx
             sudo systemctl restart nginx
-          ENDSSH
+          "
 
-          # --- B. Sync Application Files ---
-          echo "📂 Syncing project files via rsync..."
-          # --exclude '.github/' keeps workflow files off the server
-          rsync -avz --delete --exclude '.github/' \
-            -e "ssh -o StrictHostKeyChecking=no" \
+          rsync -avz --delete \
+            --exclude '.github/' \
+            -e 'ssh -o StrictHostKeyChecking=no' \
             ./ \
-            "$USER@$HOST:$WEB_PATH/"
+            \"$USER@$HOST:$WEB_PATH/\"
 
-          # --- C. Final Permissions ---
-          echo "🔐 Fixing permissions..."
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" << 'ENDFIX'
-            sudo find "$WEB_PATH" -type f -exec chmod 644 {} \;
-            sudo find "$WEB_PATH" -type d -exec chmod 755 {} \;
-            sudo chmod 755 "$WEB_PATH"
-            echo "✅ Deployment Complete! Site live at http://$HOST"
-          ENDFIX
+          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "
+            sudo find '$WEB_PATH' -type f -exec chmod 644 {} \;
+            sudo find '$WEB_PATH' -type d -exec chmod 755 {} \;
+          "
+
+          echo 'Deployment completed successfully'
