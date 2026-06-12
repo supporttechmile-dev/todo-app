@@ -27,7 +27,7 @@ jobs:
           target: "/tmp/todo-app"
           strip_components: 0
 
-      - name: Deploy on server
+      - name: Deploy on servers
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
