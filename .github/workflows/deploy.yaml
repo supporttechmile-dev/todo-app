@@ -1,87 +1,40 @@
-name: Deploy Static Site to EC2
+name: Deploy Static Website to EC2
 
 on:
   push:
     branches:
       - main
-      - master
-  workflow_dispatch:
+
+concurrency:
+  group: deploy-ec2
+  cancel-in-progress: true
 
 jobs:
   deploy:
-    name: Deploy to Ubuntu EC2
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Copy site files to EC2
+        uses: appleboy/scp-action@v0.1.7
         with:
-          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu          # use ec2-user for Amazon Linux
+          key: ${{ secrets.SSH_KEY }}
+          source: "index.html,style.css,script.js,bars-icon.svg"
+          target: "/tmp/todo-app"
+          strip_components: 0
 
-      - name: Add EC2 to Known Hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-
-      - name: Install rsync
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rsync
-
-      - name: Deploy to EC2
-        env:
-          HOST: ${{ secrets.EC2_HOST }}
-          USER: ${{ secrets.EC2_USER }}
-          WEB_PATH: ${{ secrets.EC2_WEB_PATH }}
-        run: |
-          WEB_PATH="${WEB_PATH:-/var/www/html}"
-
-          echo "Deploying to $USER@$HOST"
-
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "
-            set -e
-
-            sudo apt-get update
-            sudo apt-get install -y nginx
-
-            sudo mkdir -p '$WEB_PATH'
-            sudo chown -R '$USER:$USER' '$WEB_PATH'
-
-            cat <<EOF | sudo tee /etc/nginx/sites-available/default > /dev/null
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-
-    root $WEB_PATH;
-    index index.html index.htm;
-
-    server_name _;
-
-    location / {
-        try_files \\\$uri \\\$uri/ =404;
-    }
-}
-EOF
-
-            sudo nginx -t
-            sudo systemctl enable nginx
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu          # use ec2-user for Amazon Linux
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo mkdir -p /var/www/todo-app
+            sudo cp -r /tmp/todo-app/* /var/www/todo-app/
+            sudo chown -R www-data:www-data /var/www/todo-app
             sudo systemctl restart nginx
-          "
-
-          rsync -avz --delete \
-            --exclude '.github/' \
-            -e 'ssh -o StrictHostKeyChecking=no' \
-            ./ \
-            \"$USER@$HOST:$WEB_PATH/\"
-
-          ssh -o StrictHostKeyChecking=no "$USER@$HOST" "
-            sudo find '$WEB_PATH' -type f -exec chmod 644 {} \;
-            sudo find '$WEB_PATH' -type d -exec chmod 755 {} \;
-          "
-
-          echo 'Deployment completed successfully'
