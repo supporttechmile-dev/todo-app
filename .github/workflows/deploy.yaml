@@ -1,64 +1,35 @@
-name: Deploy Static Site to EC2
+name: Deploy to EC2
 
 on:
-  push:
-    branches: 
-      - main  # Change to your default branch if different
+push:
+branches:
+- main
 
 jobs:
-  deploy:
-    name: Deploy to EC2 via SSH
-    runs-on: ubuntu-latest
+deploy:
+runs-on: ubuntu-latest
 
-    
-    steps:
-      # 1. Checkout your code (index.html, script.js, style.css)
-      - name: Checkout repository
-        uses: actions/checkout@v4
+```
+steps:
+  - name: Checkout Repository
+    uses: actions/checkout@v4
 
-      # 2. Install rsync (usually pre-installed on ubuntu-latest, but explicit is safer)
-      - name: Install rsync
-        run: sudo apt-get update && sudo apt-get install -y rsync
+  - name: Copy files to EC2
+    uses: appleboy/scp-action@v0.1.7
+    with:
+      host: ${{ secrets.SSSH_SECRET }}
+      username: ubuntu
+      key: ${{ secrets.SSH_KEY }}
+      source: "."
+      target: "/var/www/todo-app"
 
-      # 3. Deploy via Rsync over SSH
-      # Uses the 'appleboy/ssh-action' for robust key handling & known_hosts
-      - name: Sync files to EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SSSH_SECRET }}
-          username: root       # Usually 'ubuntu' for AWS Ubuntu AMI
-          key: ${{ secrets.SSH_KEY }}
-          port: 22
-          # StrictHostKeyChecking: accept-new automatically adds the server fingerprint on first run
-          script: |
-            # Stop on any error
-            set -e
-            
-            # 1. Define target directory (CHANGE THIS TO YOUR ACTUAL PATH)
-            TARGET_DIR="C:\Users\TMS\Downloads\Create Todo List App in JavaScript\Todo List App in JavaScript"
-            
-            # 2. Create directory if missing (requires passwordless sudo for ubuntu user)
-            echo "Ensuring target directory exists..."
-            sudo mkdir -p "$TARGET_DIR"
-            sudo chown -R $USER:$USER "$TARGET_DIR"
-            
-            # 3. Sync files
-            # -avz: Archive, Verbose, Compress
-            # --delete: Remove files on server that no longer exist locally (keeps it clean)
-            # --exclude: Don't copy git folder, workflow files, or local config
-            echo "Syncing files..."
-            rsync -avz --delete \
-              --exclude='.git/' \
-              --exclude='.github/' \
-              --exclude='*.log' \
-              --exclude='Dockerfile*' \
-              --exclude='docker-compose*' \
-              ./ "$TARGET_DIR/"
-            
-            # 4. Fix permissions (Nginx/Apache usually runs as www-data)
-            echo "Setting permissions..."
-            sudo chown -R www-data:www-data "$TARGET_DIR"
-            sudo find "$TARGET_DIR" -type d -exec chmod 755 {} \;
-            sudo find "$TARGET_DIR" -type f -exec chmod 644 {} \;
-            
-            echo "✅ Deployment complete to $TARGET_DIR"
+  - name: Restart Nginx
+    uses: appleboy/ssh-action@v1.0.3
+    with:
+      host: ${{ secrets.SSSH_SECRET }}
+      username: ubuntu
+      key: ${{ secrets.SSH_KEY }}
+      script: |
+        sudo systemctl restart nginx
+        sudo systemctl status nginx --no-pager
+```
