@@ -9,7 +9,6 @@ jobs:
 deploy:
 runs-on: ubuntu-latest
 
-```
 steps:
   - name: Checkout Repository
     uses: actions/checkout@v4
@@ -35,4 +34,3 @@ steps:
         sudo chown -R www-data:www-data /var/www/todo-app
         sudo chmod -R 755 /var/www/todo-app
         sudo systemctl restart nginx
-```
