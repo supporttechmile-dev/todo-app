@@ -1,36 +1,98 @@
-name: Deploy Static Website to EC2
+name: Deploy Static Site to EC2
 
 on:
-push:
-branches:
-- main
+  push:
+    branches: [ "main", "master" ] # Trigger on push to main or master
+  workflow_dispatch: # Allows manual trigger from Actions tab
 
 jobs:
-deploy:
-runs-on: ubuntu-latest
+  deploy:
+    name: Deploy to Ubuntu EC2
+    runs-on: ubuntu-latest
+    environment: production # Optional: enables protection rules/environments in GitHub UI
 
-steps:
-  - name: Checkout Repository
-    uses: actions/checkout@v4
+    steps:
+      # 1. Checkout your repository code
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-  - name: Copy Files to EC2
-    uses: appleboy/scp-action@v0.1.7
-    with:
-      host: ${{ secrets.SSSH_SECRET }}
-      username: ubuntu
-      key: ${{ secrets.SSSH_SECRET }}
-      source: "./*"
-      target: "/tmp/todo-app"
+      # 2. Configure SSH Agent with the Private Key
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-  - name: Move Files to Web Directory
-    uses: appleboy/ssh-action@v1.0.3
-    with:
-      host: ${{ secrets.SSSH_SECRET }}
-      username: ubuntu
-      key: ${{ secrets.SSH_KEY }}
-      script: |
-        sudo mkdir -p /var/www/todo-app
-        sudo cp -r /tmp/todo-app/* /var/www/todo-app/
-        sudo chown -R www-data:www-data /var/www/todo-app
-        sudo chmod -R 755 /var/www/todo-app
-        sudo systemctl restart nginx
+      # 3. Add EC2 to Known Hosts (Prevents "Host key verification failed")
+      - name: Add EC2 to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          # Scan the host key; use port 22 (default) or customize if needed
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # 4. Deploy Files & Configure Server
+      - name: Deploy to EC2 via SSH
+        env:
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ${{ secrets.EC2_USER }}
+          # Default to standard Nginx path if secret not set
+          WEB_PATH: ${{ secrets.EC2_WEB_PATH || '/var/www/html' }}
+        run: |
+          echo "🚀 Starting deployment to $USER@$HOST:$WEB_PATH"
+
+          # --- A. Ensure Web Server (Nginx) is installed and running on EC2 ---
+          # This command runs REMOTELY on your EC2 instance
+          ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
+            # Update package list and install nginx if missing
+            if ! command -v nginx &> /dev/null; then
+              echo "📦 Installing Nginx..."
+              sudo apt-get update && sudo apt-get install -y nginx
+            fi
+
+            # Ensure web root exists and set permissions for ubuntu user
+            sudo mkdir -p "$WEB_PATH"
+            sudo chown -R $USER:$USER "$WEB_PATH"
+            
+            # Enable and start nginx
+            sudo systemctl enable nginx
+            sudo systemctl restart nginx
+            
+            # Configure Nginx to serve index.html on root (SPA fallback not needed for static, but good practice)
+            # Only write config if it doesn't exist or is default
+            if [ ! -f /etc/nginx/sites-available/default ] || ! grep -q "try_files" /etc/nginx/sites-available/default; then
+              echo "⚙️ Configuring Nginx default site..."
+              sudo tee /etc/nginx/sites-available/default > /dev/null << 'NGINX_CONF'
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        root $WEB_PATH;
+        index index.html index.htm;
+        server_name _;
+        location / {
+            try_files \$uri \$uri/ =404;
+        }
+    }
+NGINX_CONF
+              sudo systemctl reload nginx
+            fi
+          EOF
+
+          # --- B. Sync Local Build Files to EC2 ---
+          # We use rsync over SSH for fast, incremental transfers.
+          # --delete removes files on server that no longer exist locally (exact mirror).
+          # -avz = archive, verbose, compress.
+          echo "📂 Syncing files via rsync..."
+          rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ \
+            $USER@$HOST:$WEB_PATH/
+
+          # --- C. Final Permission Fix (Security) ---
+          # Ensure www-data (nginx user) can read files, but ubuntu owns them.
+          ssh -o StrictHostKeyChecking=no $USER@$HOST << 'EOF'
+            sudo find "$WEB_PATH" -type f -exec chmod 644 {} \;
+            sudo find "$WEB_PATH" -type d -exec chmod 755 {} \;
+            # Ensure nginx can traverse parent dirs
+            sudo chmod 755 "$WEB_PATH"
+            echo "✅ Deployment Complete! Site live at http://$HOST"
+          EOF
