@@ -70,7 +70,7 @@ body{
   margin-left: 0;
 }
 .filters span.active{
-  color: #bbff3c;
+  color: #3c8aff;
 }
 .controls .clear-btn{
   border: none;
@@ -84,7 +84,7 @@ body{
   letter-spacing: 0.3px;
   pointer-events: none;
   transition: transform 0.25s ease;
-  background: linear-gradient(135deg, #1798fb 0%, #2D5CFE 100%);
+  background: linear-gradient(135deg, #abfb17 0%, #81fe2d 100%);
 }
 .clear-btn.active{
   opacity: 0.9;
