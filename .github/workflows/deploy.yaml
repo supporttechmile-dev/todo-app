@@ -1,4 +1,4 @@
-name: Deploy to EC2
+name: Deploy Static Website to EC2
 
 on:
 push:
@@ -14,22 +14,25 @@ steps:
   - name: Checkout Repository
     uses: actions/checkout@v4
 
-  - name: Copy files to EC2
+  - name: Copy Files to EC2
     uses: appleboy/scp-action@v0.1.7
     with:
       host: ${{ secrets.SSSH_SECRET }}
       username: ubuntu
-      key: ${{ secrets.SSH_KEY }}
-      source: "."
-      target: "/var/www/todo-app"
+      key: ${{ secrets.SSSH_SECRET }}
+      source: "./*"
+      target: "/tmp/todo-app"
 
-  - name: Restart Nginx
+  - name: Move Files to Web Directory
     uses: appleboy/ssh-action@v1.0.3
     with:
       host: ${{ secrets.SSSH_SECRET }}
       username: ubuntu
       key: ${{ secrets.SSH_KEY }}
       script: |
+        sudo mkdir -p /var/www/todo-app
+        sudo cp -r /tmp/todo-app/* /var/www/todo-app/
+        sudo chown -R www-data:www-data /var/www/todo-app
+        sudo chmod -R 755 /var/www/todo-app
         sudo systemctl restart nginx
-        sudo systemctl status nginx --no-pager
 ```
